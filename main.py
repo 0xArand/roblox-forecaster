@@ -95,13 +95,10 @@ def estimate_velocities(reads, t0):
     its ranks over the last 72 h, shrunk toward DRIFT when data is thin."""
     window_start = t0 - timedelta(hours=72)
     obs = {}
-    first_seen = {}
     for r in reads:
         t = _parse_time(r["at"])
         for g in r["up_and_coming"]:
             u = g["universe_id"]
-            if u not in first_seen:
-                first_seen[u] = t
             if t >= window_start:
                 obs.setdefault(u, []).append((t, g["rank"]))
     vel = {}
@@ -127,12 +124,11 @@ def estimate_velocities(reads, t0):
                     vel[u] = max(-4.0, min(4.0, b))
                     continue
         vel[u] = DRIFT
-    return vel, first_seen
+    return vel
 
 
 def estimate_pools(reads):
     """Empirical entry-rank pool and first-day velocity pool for new games."""
-    first_rank = {}
     first_time = {}
     first_day_vel = []
     entry_ranks = []
@@ -143,7 +139,6 @@ def estimate_pools(reads):
             u = g["universe_id"]
             if u not in seen:
                 seen.add(u)
-                first_rank[u] = g["rank"]
                 first_time[u] = t
                 if len(reads) > 1 and r is not reads[0]:
                     entry_ranks.append(g["rank"])
@@ -270,7 +265,6 @@ def simulate(last_chart, vel, entry_ranks, new_vel, exit_hour):
 
 def build_forecast(last_chart, counts, unnamed, rank_sum, rank_n, total):
     places = 10
-    n_games = len(last_chart)
     # diffuse prior per place: broad kernel around the diagonal, over the
     # top 40 games by their rank at the close of history
     top40 = sorted(last_chart, key=lambda u: last_chart[u])[:40]
@@ -371,7 +365,7 @@ def main():
         forecast = persistence_forecast(last_chart)
     else:
         t0 = _parse_time(last["at"])
-        vel, _first_seen = estimate_velocities(reads, t0)
+        vel = estimate_velocities(reads, t0)
         entry_ranks, new_vel = estimate_pools(reads)
         exit_hour = age_out_hours(reads, t0)
         counts, unnamed, rank_sum, rank_n, total = simulate(

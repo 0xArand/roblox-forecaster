@@ -75,7 +75,9 @@ forecast, 2-read history runs the simulation; both emit valid output.
 
 A second, independent harness was written from scratch (scoring exactly
 per RULES.txt: named p, else the place's unnamed share split over the
-unnamed games on that read's chart, log floored at ln(0.0001)). Protocol:
+unnamed games on that read's chart, log floored at ln(0.0001)). It is
+kept in this repo as backtest.py (`python3 backtest.py`, plus `rho`,
+`umin` and `blend` sweep modes). Protocol:
 for each cutoff date D at 00:00 UTC, train on reads with `at` < D and
 score on reads with D < `at` <= D + 72 h. That gives 10 / 11 / 11 test
 reads for Nov 3 / 4 / 5 (32 reads), so the means below are not directly
