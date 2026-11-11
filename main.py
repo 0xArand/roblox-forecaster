@@ -28,9 +28,14 @@ Model (see ANALYSIS.md for the data behind it):
     covers games not yet on the chart. The unnamed share is the single
     biggest calibration lever: the chart turns over so fast that
     overconfident named probabilities are punished far more than the
-    dilution costs. Parameters were tuned on three 72 h backtests
-    (cutoffs 2026-11-03/04/05): this configuration scores -38.31
-    mean against the house baseline's -53.30 on the same windows.
+    dilution costs. Parameters were re-tuned in a fresh session on three
+    72 h backtests (cutoffs 2026-11-03/04/05, 10/11/11 reads, scoring
+    exactly per RULES.txt): this configuration (rho 0.98) scores -39.61
+    mean against the house baseline's -51.78 on the same windows; rho
+    0.92 scored -39.95, rho 0.85 -40.13, rho 1.00 -39.73, U_MIN 0.32
+    -39.91, BLEND 0.05/0.20 -39.96/-40.03. A drift mean-reversion variant
+    (velocity mean-reverting to DRIFT instead of DRIFT/(1-RHO)) scored
+    -40.08 and was rejected.
 
 Standard library only, no network, no wall clock, fixed seed: two runs
 on the same input produce byte-identical output.
@@ -45,7 +50,7 @@ from datetime import datetime, timedelta, timezone
 SEED = 20261113
 HOURS = 72
 N_PATHS = 1500
-RHO = 0.92            # velocity AR(1) coefficient per hour
+RHO = 0.98            # velocity AR(1) coefficient per hour
 SIGMA_V = 0.30        # velocity innovation sd (ranks/hour)
 DRIFT = 0.08          # slow slide down the chart (ranks/hour)
 BLEND = 0.10          # weight of the diffuse prior
@@ -173,11 +178,31 @@ def age_out_hours(reads, t0):
         det = r.get("details")
         if not det:
             continue
-        for item in det:
-            if isinstance(item, dict) and item.get("universe_id") is not None:
-                c = item.get("created")
-                if c:
-                    created[item["universe_id"]] = _parse_time(c)
+        # details may be a list of game dicts, or a dict keyed by
+        # universe id: the practice kit's details is always null, so the
+        # final history's exact shape is unverified. Handle both, so a
+        # dict-shaped details does not silently disable age-out.
+        if isinstance(det, dict):
+            entries = []
+            for key, item in det.items():
+                if not isinstance(item, dict):
+                    continue
+                uid = item.get("universe_id")
+                if uid is None:
+                    try:
+                        uid = int(key)
+                    except (TypeError, ValueError):
+                        continue
+                entries.append((uid, item.get("created")))
+        else:
+            entries = [
+                (item.get("universe_id"), item.get("created"))
+                for item in det
+                if isinstance(item, dict)
+            ]
+        for uid, c in entries:
+            if uid is not None and c:
+                created[uid] = _parse_time(c)
     out = {}
     for u, c in created.items():
         age_h = (t0 - c).total_seconds() / 3600.0

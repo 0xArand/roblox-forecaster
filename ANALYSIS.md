@@ -39,13 +39,14 @@ hourly) will have them.
 ## Model
 
 Monte Carlo over the chart's latent rank-scores, 72 hourly steps, fixed
-seed: per-game AR(1) velocity (rho ~0.85) + rank-dependent noise +
-drift + bucket dropout + new-game entry (empirical entry-rank and
-first-day velocity pools) + 28-day age-out from `details.created` when
-present. Tally P(game at place k) averaged over all 72 hours (the score
-is the mean over the window's hourly reads). Blend with a diffuse prior,
-leave an unnamed share per place (covers brand-new games), name a game
-at a place only when its modelled p beats the unnamed per-game value.
+seed: per-game AR(1) velocity (rho 0.98, re-tuned 2026-11-12, see below)
++ rank-dependent noise + drift + bucket dropout + new-game entry
+(empirical entry-rank and first-day velocity pools) + 28-day age-out
+from `details.created` when present. Tally P(game at place k) averaged
+over all 72 hours (the score is the mean over the window's hourly reads).
+Blend with a diffuse prior, leave an unnamed share per place (covers
+brand-new games), name a game at a place only when its modelled p beats
+the unnamed per-game value.
 
 ## Backtest results (own harness, cutoffs Nov 3 / Nov 4 / Nov 5, 10 reads each)
 
@@ -58,12 +59,62 @@ House baseline (persistence): -52.71 / -50.27 / -56.91, mean -53.30.
 | RHO 0.92 | -37.64 | -38.20 | -45.39 | -40.41 |
 | U_MIN 0.12 | -36.68 | -37.65 | -43.42 | -39.25 |
 | U_MIN 0.18 + RHO 0.92 + BLEND 0.10 | -36.49 | -36.85 | -41.88 | -38.41 |
-| **FINAL: U_MIN 0.25 + RHO 0.92 + BLEND 0.10** | **-36.63** | **-36.95** | **-41.35** | **-38.31** |
+| **FINAL (then): U_MIN 0.25 + RHO 0.92 + BLEND 0.10** | **-36.63** | **-36.95** | **-41.35** | **-38.31** |
 | variant B: empirical recency-weighted place frequencies (no simulation) | -45.66 | -46.99 | -56.08 | -49.57 |
 
 Final beats the house baseline by +14.99 on the same windows (baseline
 mean -53.30; practice-window baseline reported by the house: -43.512039).
 N_PATHS 3000 scores the same as 1500 (-38.307 vs -38.310), so 1500 stays.
-Full-history run: ~20 s, 19,228-byte forecast, two runs byte-identical.
+Full-history run (re-verified 2026-11-12 in the finalising session, rho
+0.98): ~21 s per run, 23,160-byte forecast, two runs byte-identical,
+451 probability rows, per-place sums 0.75, top10 10 distinct ids.
 Edge cases verified: 1-read history falls back to the persistence
 forecast, 2-read history runs the simulation; both emit valid output.
+
+## Re-tune in a fresh session (2026-11-12, this file's final version)
+
+A second, independent harness was written from scratch (scoring exactly
+per RULES.txt: named p, else the place's unnamed share split over the
+unnamed games on that read's chart, log floored at ln(0.0001)). Protocol:
+for each cutoff date D at 00:00 UTC, train on reads with `at` < D and
+score on reads with D < `at` <= D + 72 h. That gives 10 / 11 / 11 test
+reads for Nov 3 / 4 / 5 (32 reads), so the means below are not directly
+comparable to the 10-reads-each table above, only within this section.
+House baseline on this protocol: -50.88 / -48.63 / -55.84, mean -51.78.
+
+| variant | cutoff Nov 3 | cutoff Nov 4 | cutoff Nov 5 | mean |
+|---|---|---|---|---|
+| current then: RHO 0.92, U_MIN 0.25, BLEND 0.10 | -40.30 | -38.82 | -40.74 | -39.95 |
+| U_MIN 0.18 | -40.70 | -39.07 | -41.13 | -40.30 |
+| U_MIN 0.32 | -40.21 | -38.86 | -40.65 | -39.91 |
+| U_MIN 0.40 | -40.38 | -39.16 | -40.83 | -40.12 |
+| RHO 0.85 | -39.90 | -38.69 | -41.82 | -40.13 |
+| **RHO 0.98 (adopted)** | **-40.63** | **-38.08** | **-40.13** | **-39.61** |
+| RHO 1.00 | -40.84 | -38.20 | -40.14 | -39.73 |
+| RHO 0.98 + U_MIN 0.32 | -40.95 | -38.27 | -40.04 | -39.76 |
+| BLEND 0.05 | -40.39 | -38.83 | -40.66 | -39.96 |
+| BLEND 0.20 | -40.33 | -38.84 | -40.91 | -40.03 |
+| drift mean-reversion (v mean-reverts to DRIFT) | -40.40 | -38.98 | -40.86 | -40.08 |
+
+What was adopted, and why: **RHO 0.92 -> 0.98 only.** It is the best
+single change found (+0.34 mean over rho 0.92, winning 2 of 3 windows)
+and the neighbouring values (0.85, 1.00) are both worse, so 0.98 sits
+on a local optimum rather than at the edge of the tested range. U_MIN
+and BLEND are flat around the current values (0.25 / 0.10), so they
+were left alone; the RHO 0.98 + U_MIN 0.32 combination is worse than
+RHO 0.98 alone. The drift mean-reversion variant was rejected: the
+current update `v = RHO*v + DRIFT + noise` has stationary mean
+DRIFT/(1-RHO) = 1.0 ranks/h rather than the measured +0.08/h, but
+correcting it scores worse (-40.08), so the as-built form stays.
+Honest caveat: these gaps are small (a few tenths on 32 reads) and the
+windows overlap, so rho 0.98 is a modest, directionally consistent
+improvement, not a breakthrough.
+
+Robustness fix in the same revision: `age_out_hours` now accepts
+`details` as a list of game dicts *or* as a dict keyed by universe id.
+The practice kit's `details` is always null and the starter never
+reads it, so the final history's exact shape is unverified; the old
+code iterated a dict's keys and silently disabled age-out. Verified
+synthetically: list form, dict-keyed form and dict-with-universe_id
+form all return the same exit hour (24 for a game created 27 days
+before t0), null details returns {}.
